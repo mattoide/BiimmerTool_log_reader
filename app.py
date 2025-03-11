@@ -5,7 +5,9 @@ import pandas as pd
 import plotly.express as px
 
 # Carica il file CSV
-CSV_FILE = "actual-expected_2025-03-07_204227.csv"
+# CSV_FILE = "actual-expected_2025-03-07_204227.csv"
+CSV_FILE = "actual-expected_2025-03-10_193834.csv"
+# CSV_FILE = "actual-expected_2025-03-10_195213.csv"
 
 # Crea l'app Dash
 app = dash.Dash(__name__)
@@ -24,7 +26,7 @@ df[df.columns[1:]] = df[df.columns[1:]].applymap(lambda x: str(x).replace(',', '
 df[df.columns[1:]] = df[df.columns[1:]].apply(pd.to_numeric, errors='coerce')
 
 # Rimuove eventuali righe con valori NaN
-df = df.dropna()
+# df = df.dropna()
 
 # Colonne Y (tutte tranne 'Time')
 y_columns = df.columns[1:]
