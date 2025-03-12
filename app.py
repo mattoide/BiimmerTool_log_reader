@@ -41,7 +41,7 @@ app.layout = html.Div(
         dcc.Checklist(
             id='selezione-dati',
             options=[],  # Inizialmente vuoto
-            value=[],
+            value=[],  # Valore vuoto iniziale
             inline=True
         ),
 
@@ -57,6 +57,7 @@ app.layout = html.Div(
     ]
 )
 
+# Funzione per elaborare il CSV
 def process_csv(contents):
     content_type, content_string = contents.split(',')
     decoded = base64.b64decode(content_string)
@@ -80,17 +81,45 @@ def aggiorna_dati(contents, n_clicks, colonne_selezionate, colonne_attuali):
     ctx = dash.callback_context
     trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
 
+    # Se i dati sono stati caricati
     if trigger_id == 'upload-data' and contents:
         df = process_csv(contents)
         y_columns = df.columns[1:]
         return [{'label': col, 'value': col} for col in y_columns], list(y_columns), px.line(df, x='Time', y=list(y_columns))
 
+    # Se è stato premuto il pulsante "Seleziona/Deseleziona Tutte"
     if trigger_id == 'toggle-button':
-        return colonne_attuali, [] if colonne_selezionate else [col['value'] for col in colonne_attuali], dash.no_update
+        if colonne_selezionate and len(colonne_selezionate) == len(colonne_attuali):
+            # Se tutte le colonne sono selezionate, deseleziona tutte
+            return colonne_attuali, [], {
+                'data': [],
+                'layout': {
+                    'title': 'Nessuna colonna selezionata',
+                    'xaxis': {'title': 'Time'},
+                    'yaxis': {'title': 'Valore'}
+                }
+            }
+        else:
+            # Se non tutte le colonne sono selezionate, ricarica i dati e seleziona tutte le colonne
+            df = process_csv(contents)
+            y_columns = df.columns[1:]
+            return [{'label': col, 'value': col} for col in y_columns], list(y_columns), px.line(df, x='Time', y=list(y_columns))
 
+    # Quando l'utente cambia la selezione delle colonne
     if trigger_id == 'selezione-dati':
         df = process_csv(contents) if contents else pd.DataFrame()
         if not df.empty:
+            # Se non ci sono colonne selezionate, visualizza un grafico vuoto o messaggio
+            if not colonne_selezionate:
+                return colonne_attuali, [], {
+                    'data': [],
+                    'layout': {
+                        'title': 'Nessuna colonna selezionata',
+                        'xaxis': {'title': 'Time'},
+                        'yaxis': {'title': 'Valore'}
+                    }
+                }
+            # Crea il grafico con le colonne selezionate
             return colonne_attuali, colonne_selezionate, px.line(df, x='Time', y=colonne_selezionate)
 
     raise dash.exceptions.PreventUpdate
