@@ -3,33 +3,13 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 import pandas as pd
 import plotly.express as px
-
-# Carica il file CSV
-# CSV_FILE = "actual-expected_2025-03-07_204227.csv"
-CSV_FILE = "actual-expected_2025-03-10_193834.csv"
-# CSV_FILE = "actual-expected_2025-03-10_195213.csv"
+import dash.exceptions
+import base64
+import io
 
 # Crea l'app Dash
 app = dash.Dash(__name__)
-
-# Carica i dati dal CSV
-df = pd.read_csv(CSV_FILE)
-
-# Preprocessing per il formato del tempo
-df['Time'] = df['Time'].str.replace(',', '.')
-df['Time'] = pd.to_datetime(df['Time'], format='%H:%M:%S.%f')
-
-# Sostituisce la virgola con il punto per le colonne numeriche
-df[df.columns[1:]] = df[df.columns[1:]].applymap(lambda x: str(x).replace(',', '.'))
-
-# Converte tutte le colonne tranne 'Time' in numerico
-df[df.columns[1:]] = df[df.columns[1:]].apply(pd.to_numeric, errors='coerce')
-
-# Rimuove eventuali righe con valori NaN
-# df = df.dropna()
-
-# Colonne Y (tutte tranne 'Time')
-y_columns = df.columns[1:]
+app.title = "Visualizzatore CSV"
 
 # Layout dell'app
 app.layout = html.Div(
@@ -44,36 +24,27 @@ app.layout = html.Div(
     children=[
         html.H1("Grafico Interattivo con Dati CSV", style={'textAlign': 'center'}),
 
-        # Contenitore per il pulsante e la checklist
-        html.Div(
-            style={'padding': '10px', 'textAlign': 'center'},
-            children=[
-                html.Button("Seleziona/Deseleziona Tutte", id="toggle-button", n_clicks=0),
-                html.Br(), html.Br(),
+        dcc.Upload(
+            id='upload-data',
+            children=html.Button("Carica un file CSV"),
+            multiple=False,
+            style={'textAlign': 'center', 'marginBottom': '10px'}
+        ),
 
-                # Contenitore per le checkbox con layout flessibile
-                html.Div(
-                    id='checklist-container',
-                    style={
-                        'display': 'flex',
-                        'flexWrap': 'wrap',  # Le checkbox vanno a capo automaticamente
-                        'gap': '10px',  # Spazio tra le checkbox
-                        'justifyContent': 'center',
-                        'padding': '5px'
-                    },
-                    children=[
-                        dcc.Checklist(
-                            id='selezione-dati',
-                            options=[{'label': col, 'value': col} for col in y_columns],
-                            value=[],  # Di default nessuna selezionata
-                            inline=True  # Checkbox in riga, ma con wrapping
-                        )
-                    ]
-                )
+        html.Div(
+            style={'textAlign': 'center', 'marginBottom': '10px'},
+            children=[
+                html.Button("Seleziona/Deseleziona Tutte", id="toggle-button", n_clicks=0)
             ]
         ),
 
-        # Grafico che occupa tutto lo spazio rimanente
+        dcc.Checklist(
+            id='selezione-dati',
+            options=[],  # Inizialmente vuoto
+            value=[],
+            inline=True
+        ),
+
         dcc.Graph(
             id='grafico',
             style={
@@ -86,36 +57,43 @@ app.layout = html.Div(
     ]
 )
 
+def process_csv(contents):
+    content_type, content_string = contents.split(',')
+    decoded = base64.b64decode(content_string)
+    df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+
+    if 'Time' in df.columns:
+        df['Time'] = df['Time'].astype(str).str.replace(',', '.')
+        df['Time'] = pd.to_datetime(df['Time'], format='%H:%M:%S.%f', errors='coerce')
+
+    for col in df.columns[1:]:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    return df
+
 @app.callback(
-    Output('selezione-dati', 'value'),
-    Input('toggle-button', 'n_clicks'),
-    State('selezione-dati', 'value')
+    [Output('selezione-dati', 'options'), Output('selezione-dati', 'value'), Output('grafico', 'figure')],
+    [Input('upload-data', 'contents'), Input('toggle-button', 'n_clicks'), Input('selezione-dati', 'value')],
+    [State('selezione-dati', 'options')]
 )
-def toggle_colonne(n_clicks, colonne_selezionate):
-    """
-    Se nessuna colonna è selezionata, seleziona tutte;
-    altrimenti, deseleziona tutte.
-    """
-    if n_clicks == 0:
-        raise dash.exceptions.PreventUpdate  # Non fare nulla al primo avvio
+def aggiorna_dati(contents, n_clicks, colonne_selezionate, colonne_attuali):
+    ctx = dash.callback_context
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
 
-    return list(y_columns) if len(colonne_selezionate) == 0 else []
+    if trigger_id == 'upload-data' and contents:
+        df = process_csv(contents)
+        y_columns = df.columns[1:]
+        return [{'label': col, 'value': col} for col in y_columns], list(y_columns), px.line(df, x='Time', y=list(y_columns))
 
-@app.callback(
-    Output('grafico', 'figure'),
-    Input('selezione-dati', 'value')
-)
-def aggiorna_grafico(colonne_selezionate):
-    if not colonne_selezionate:
-        return px.line(title="Seleziona almeno un parametro da visualizzare")
+    if trigger_id == 'toggle-button':
+        return colonne_attuali, [] if colonne_selezionate else [col['value'] for col in colonne_attuali], dash.no_update
 
-    fig = px.line(df, x='Time', y=colonne_selezionate, title="Dati CSV Interattivi")
+    if trigger_id == 'selezione-dati':
+        df = process_csv(contents) if contents else pd.DataFrame()
+        if not df.empty:
+            return colonne_attuali, colonne_selezionate, px.line(df, x='Time', y=colonne_selezionate)
 
-    # Tooltip personalizzato che mostra tutti i valori selezionati
-    hover_template = "<br>".join([f"{col}: %{{customdata[{i}]}}" for i, col in enumerate(colonne_selezionate)])
-    fig.update_traces(customdata=df[colonne_selezionate].values, hovertemplate=hover_template)
-
-    return fig
+    raise dash.exceptions.PreventUpdate
 
 if __name__ == '__main__':
     app.run_server(debug=True)
